@@ -7,7 +7,7 @@ edition = "2021"
 name = "crypbitrage"
 
 [[bin]]
-name="simple_arbitrage"
+name="two_ex_simple_arb"
 
 [dependencies]
 anyhow = "1.0.95"
