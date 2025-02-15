@@ -7,7 +7,7 @@ edition = "2021"
 name = "crypbitrage"
 
 [[bin]]
-name="crypto"
+name="simple_arbitrage"
 
 [dependencies]
 anyhow = "1.0.95"
@@ -17,3 +17,4 @@ tokio-tungstenite = { version = "0.26.1", features = ["native-tls"] }
 clap = { version = "4", features = ["derive"] }
 serde_json = "1.0.138"
 serde = { version = "1", features = ["derive"] }
+ordered-float = "4.6.0"
