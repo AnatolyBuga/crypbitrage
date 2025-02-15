@@ -23,66 +23,60 @@ pub struct CliArgs {
 
 const OKX_URL: &str = "wss://ws.okx.com:8443/ws/v5/public";
 const DERIBIT_URL: &str = "wss://www.deribit.com/ws/api/v2";
-type Price = f64;
-type Quantity = f64;
 
-enum OrderType{
-    Bid,
-    Ask
+struct BidsAsks{
+    pub asks: Vec<[f64;2]>,
+    pub bids: Vec<[f64;2]>
 }
 
-struct Order(Price, Quantity, OrderType);
-
-struct OrderFromExchange{
-    order: Order,
-    exchange_id: u8,
+impl From<OkxData> for BidsAsks {
+    fn from(ex_data: OkxData) -> Self {
+        // known length
+        let [data] = ex_data.data; 
+        Self { asks: data.asks, bids: data.bids }
+    }
 }
 
-struct ExchangeConnection<S>{
-    /// Exchange id
-    id: u8,
-    /// Websocket read stream
-    read: SplitStream<S>,
-    // TODO
-    // write: 
+impl From<DeribitData> for BidsAsks {
+    fn from(ex_data: DeribitData) -> Self {
+        Self { asks: ex_data.params.data.asks, bids: ex_data.params.data.bids }
+    }
 }
 
-// impl<S> ExchangeConnection<S> {
-//     pub fn from_url(id: u8, url: &str, subscribe_msg: String) -> Self {
+// Raw DeSerialised data from Exchanges
 
-//         let (ws_stream, _) = connect_async(OKX_URL).await.expect("WebSocket connection failed");
-//         let (mut write, mut read) = ws_stream.split();
-
-//         tokio::spawn(  async  {
-
-//         });
-//     }
-// }
-
-
-struct ExchangeConnectionHandle;
-
-// struct ExchangePool {
-//     ex1: ExchangeConnection,
-//     ex2: ExchangeConnection,
-// }
-
-struct CrossExchangeLOB{
-    bids: BTreeSet<OrderFromExchange>,
-    asks: BTreeSet<OrderFromExchange>
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct OkxBidsAsks{
-    #[serde(deserialize_with = "deserialize_vec_of_arrays")]
-    asks: Vec<[f64;2]>,
-    #[serde(deserialize_with = "deserialize_vec_of_arrays")]
-    bids: Vec<[f64;2]>
-}
-
+/// OKX Exchange Subscription messages
 #[derive(Serialize, Deserialize, Debug)]
 struct OkxData{
-    data: Vec<OkxBidsAsks>
+    data: [BidsAsksOkx;1]
+}
+
+/// Deribit Exchange Subscription messages
+#[derive(Serialize, Deserialize, Debug)]
+struct DeribitData{
+    params: DeribitDataParams
+}
+
+// ### ### ###
+
+#[derive(Serialize, Deserialize, Debug)]
+struct BidsAsksDeribit{
+    pub asks: Vec<[f64;2]>,
+    pub bids: Vec<[f64;2]>
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct BidsAsksOkx{
+    #[serde(deserialize_with = "deserialize_vec_of_arrays")]
+    pub asks: Vec<[f64;2]>,
+    #[serde(deserialize_with = "deserialize_vec_of_arrays")]
+    pub bids: Vec<[f64;2]>
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+struct DeribitDataParams{
+    data: BidsAsksDeribit
 }
 
 // Custom deserializer function
@@ -106,11 +100,35 @@ where
 #[derive(Debug)]
 enum ExchangeData{
     OKX(OkxData),
+    Deribit(DeribitData),
+}
+
+type Price = f64;
+type Quantity = f64;
+type ExchangeId = u8;
+type IsBid = bool; // if not bid, then Ask
+
+struct MarketOrder(Price, Quantity, IsBid, ExchangeId);
+
+/// Simple arbitrage strategy
+struct SimpleArbitrage{
+    /// Combined Limit Order Book of two exchanges
+    combined_lob: 
+}
+
+impl SimpleArbitrage {
+
 }
 
 async fn arbitrage(mut receiver: UnboundedReceiver<ExchangeData>){
     while let Some(msg) = receiver.recv().await {
-        println!("{msg:#?}")
+
+        // Assume arbitrage check is a heavy CPU task 
+        tokio::task::spawn_blocking( move || {
+            println!("{msg:#?}")
+        })
+        .await
+        .expect("Panic on arbitrage calc")
     }
 }
 
@@ -121,7 +139,9 @@ async fn main() {
 
     // TODO Not sure about channel size
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-
+    let s1 = sender.clone();
+    let s2 = sender.clone();
+    
     // OKX
     let subscribe_msg = json!({
         "op": "subscribe",
@@ -140,13 +160,35 @@ async fn main() {
 
     println!("Subscribed to OKX");
 
-    // DERIBIT_URL
+    let task1 = tokio::spawn( async move {
+        while let Some(msg) = read.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    println!("OKX: {}", text);
+                    // TODO Optimisation decode only data , not the whole message
+                    match serde_json::from_slice::<OkxData>(text.as_bytes()) {
+                        Ok(okx_data) => s1.send(ExchangeData::OKX(okx_data)).expect("OKX couldn't send"),//println!("OKX Deser: {okx_data:#?}"),
+                        Err(e) => println!("OKX: couldn't deserialise: {e}")
+                    } 
+                }
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("WebSocket error: {:?}", e);
+                    break;
+                }
+            }
+        }
+    });
 
-    let channel = format!("book.{}.none.20.100ms", cli.deribit_inst);
+
+
+
+    // DERIBIT_URL
+    let deribit_channel = format!("book.{}.none.20.100ms", cli.deribit_inst);
 
     let subscribe_msg2 = json!({
         "method": "public/subscribe",
-        "params": {"channels": [channel]},
+        "params": {"channels": [deribit_channel]},
         "jsonrpc": "2.0",
         "id": 0}).to_string();
 
@@ -160,43 +202,16 @@ async fn main() {
 
     println!("Subscribed to DERIBIT");
 
-
-    let task1 = tokio::spawn( async move {
-        while let Some(msg) = read.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    println!("OKX: {}", text);
-                    // TODO Optimisation decode only data , not the whole message
-                    match serde_json::from_slice::<OkxData>(text.as_bytes()) {
-                        Ok(okx_data) => sender.send(ExchangeData::OKX(okx_data)).expect("OKX couldn't send"),//println!("OKX Deser: {okx_data:#?}"),
-                        Err(e) => println!("OKX: couldn't deserialise: {e}")
-                        
-                    } 
-                    // let mut json: Value = serde_json::from_slice(text.as_bytes()).expect("Invalid JSON");
-                    // if let Some(_) = json.get_mut("data") {
-                    //     let data = json["data"].take();
-                    //     println!("OKX Extracted data: {:?}", data);
-                    //     let okx_data: OkxData = serde_json::from_value(data).expect("Failed to deser OKX Data");
-                    //     println!("OKX Deser data: {:?}", okx_data);
-                    // } else {
-                    //     println!("OKX Data Not found");
-                    // }
-                    // 
-                }
-                Ok(_) => (),
-                Err(e) => {
-                    eprintln!("WebSocket error: {:?}", e);
-                    break;
-                }
-            }
-        }
-    });
-
     let task2 = tokio::spawn( async move {
         while let Some(msg) = read2.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    println!("Received DERIBIT: {}", text);
+                    println!("DERIBIT: {}", text);
+                    // TODO Optimisation decode only data , not the whole message
+                    match serde_json::from_slice::<DeribitData>(text.as_bytes()) {
+                        Ok(data) => s2.send(ExchangeData::Deribit(data)).expect("Deribit couldn't send"),
+                        Err(e) => println!("Deribit: couldn't deserialise: {e}")
+                    }
                 }
                 Ok(_) => (),
                 Err(e) => {
@@ -207,10 +222,12 @@ async fn main() {
         }
     });
 
-    let task3 = tokio::task::spawn_blocking( || {arbitrage(receiver)} );
+    // let task3 = tokio::task::spawn_blocking( || {arbitrage(receiver)} );
+
+    let task3 = tokio::spawn(arbitrage(receiver));
 
     // https://stackoverflow.com/questions/69638710/when-should-you-use-tokiojoin-over-tokiospawn
-    tokio::join!(task1);
+    tokio::join!(task1, task2, task3);
 
     println!("WebSocket connection closed.");
     
