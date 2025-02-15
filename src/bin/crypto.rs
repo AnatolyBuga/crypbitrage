@@ -1,5 +1,8 @@
+use std::collections::BTreeSet;
+
 use clap::Parser;
 use futures_util::{stream::SplitStream, SinkExt, StreamExt};
+use serde::{Deserialize, Serialize, Deserializer};
 use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -22,7 +25,17 @@ const DERIBIT_URL: &str = "wss://www.deribit.com/ws/api/v2";
 type Price = f64;
 type Quantity = f64;
 
-struct PriceQuantity(Price, Quantity);
+enum OrderType{
+    Bid,
+    Ask
+}
+
+struct Order(Price, Quantity, OrderType);
+
+struct OrderFromExchange{
+    order: Order,
+    exchange_id: u8,
+}
 
 struct ExchangeConnection<S>{
     /// Exchange id
@@ -53,9 +66,45 @@ struct ExchangeConnectionHandle;
 //     ex2: ExchangeConnection,
 // }
 
-enum MyMessage{
-    LOB,
-    Execute
+struct CrossExchangeLOB{
+    bids: BTreeSet<OrderFromExchange>,
+    asks: BTreeSet<OrderFromExchange>
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct OkxBidsAsks{
+    #[serde(deserialize_with = "deserialize_vec_of_arrays")]
+    asks: Vec<[f64;2]>,
+    #[serde(deserialize_with = "deserialize_vec_of_arrays")]
+    bids: Vec<[f64;2]>
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct OkxData{
+    data: Vec<OkxBidsAsks>
+}
+
+// Custom deserializer function
+fn deserialize_vec_of_arrays<'de, D>(deserializer: D) -> Result<Vec<[f64; 2]>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw: Vec<Vec<String>> = Deserialize::deserialize(deserializer)?;
+
+    raw.into_iter()
+        .map(|arr| {
+            let parsed: Result<Vec<f64>, _> = arr.iter().take(2).map(|s| s.parse::<f64>()).collect();
+            parsed
+                .map_err(serde::de::Error::custom)?
+                .try_into()
+                .map_err(|_| serde::de::Error::custom("Failed to convert to [f64; 2]"))
+        })
+        .collect()
+}
+
+#[derive(Debug)]
+enum ExchangeData{
+    OKX(OkxData),
 }
 
 #[tokio::main]
@@ -63,7 +112,8 @@ async fn main() {
 
     let cli = CliArgs::parse();
 
-    // let (send, mut recv) = tokio::sync::mpsc::channel(64);
+    // TODO Not sure about channel size
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
     // OKX
     let subscribe_msg = json!({
@@ -110,12 +160,20 @@ async fn main() {
                 Ok(Message::Text(text)) => {
                     println!("OKX: {}", text);
                     // TODO Optimisation decode only data , not the whole message
-                    let json: Value = serde_json::from_slice(text.as_bytes()).expect("Invalid JSON");
-                    if let Some(values) = json.get("data") {
-                        println!("OKX Extracted data: {:?}", values);
-                    } else {
-                        println!("OKX Data Not found");
-                    }
+                    match serde_json::from_slice::<OkxData>(text.as_bytes()) {
+                        Ok(okx_data) => sender.send(ExchangeData::OKX(okx_data)).expect("OKX couldn't send"),//println!("OKX Deser: {okx_data:#?}"),
+                        Err(e) => println!("OKX: couldn't deserialise: {e}")
+                        
+                    } 
+                    // let mut json: Value = serde_json::from_slice(text.as_bytes()).expect("Invalid JSON");
+                    // if let Some(_) = json.get_mut("data") {
+                    //     let data = json["data"].take();
+                    //     println!("OKX Extracted data: {:?}", data);
+                    //     let okx_data: OkxData = serde_json::from_value(data).expect("Failed to deser OKX Data");
+                    //     println!("OKX Deser data: {:?}", okx_data);
+                    // } else {
+                    //     println!("OKX Data Not found");
+                    // }
                     // 
                 }
                 Ok(_) => (),
@@ -140,6 +198,14 @@ async fn main() {
                 }
             }
         }
+    });
+
+    let task3 = tokio::task::spawn_blocking( move || {
+        async{
+        while let Some(msg) = receiver.recv().await {
+            println!("{msg:#?}")
+        }
+    }
     });
 
     // https://stackoverflow.com/questions/69638710/when-should-you-use-tokiojoin-over-tokiospawn
