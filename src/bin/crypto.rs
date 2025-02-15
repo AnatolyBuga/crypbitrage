@@ -4,6 +4,7 @@ use clap::Parser;
 use futures_util::{stream::SplitStream, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize, Deserializer};
 use serde_json::{json, Value};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// Helps parsing cli args.
@@ -107,6 +108,12 @@ enum ExchangeData{
     OKX(OkxData),
 }
 
+async fn arbitrage(mut receiver: UnboundedReceiver<ExchangeData>){
+    while let Some(msg) = receiver.recv().await {
+        println!("{msg:#?}")
+    }
+}
+
 #[tokio::main]
 async fn main() {
 
@@ -200,13 +207,7 @@ async fn main() {
         }
     });
 
-    let task3 = tokio::task::spawn_blocking( move || {
-        async{
-        while let Some(msg) = receiver.recv().await {
-            println!("{msg:#?}")
-        }
-    }
-    });
+    let task3 = tokio::task::spawn_blocking( || {arbitrage(receiver)} );
 
     // https://stackoverflow.com/questions/69638710/when-should-you-use-tokiojoin-over-tokiospawn
     tokio::join!(task1);
