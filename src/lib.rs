@@ -18,6 +18,11 @@ pub type Quantity = f64;
 pub type ExchangeId = u8;
 /// Bids or Asks
 pub type LobLeg = BTreeMap<(Price, ExchangeId), Quantity>;
+/// Message to Execute this Order on the exchnage
+pub type OrderExecMessage = Message;
+
+/// Maps Exchange Id to a producer (which is used to send message to that particular exchange)
+pub type ExchangeProducerMap = HashMap<u8, UnboundedSender<Message>>;
 
 #[derive(Default, Debug)]
 pub struct CrossExchangeLOB {
@@ -67,12 +72,6 @@ pub fn create_unbound_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>)
     tokio::sync::mpsc::unbounded_channel()
 }
 
-/// Message to Execute this Order on the exchnage
-pub type OrderExecMessage = Message;
-
-/// Maps Exchange Id to a producer (which is used to send message to that particular exchange)
-pub type ExchangeProducerMap = HashMap<u8, UnboundedSender<Message>>;
-
 /// sender - sends exchange data to downstream consumers (Arbitrage Strategies)
 pub async fn exchange_ws_connection<T>(
     sender: UnboundedSender<T>,
@@ -84,10 +83,9 @@ pub async fn exchange_ws_connection<T>(
 where
     T: Send + DeserializeOwned + 'static,
 {
-    // TODO
     // Open a MPSC channel here (to be used as SPSC)
     // receiver stays with with exchange and listens
-    // producer is returned to downstream arb strategy
+    // producer is returned and to be used in downstream arb strategy
     let (order_sender, mut order_receiver) = create_unbound_channel::<OrderExecMessage>();
 
     // Start websocket sesh

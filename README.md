@@ -1,41 +1,35 @@
-# Structure explained
-The idea of the binary (and the lib):
+# <div style="color: lightblue; font-weight: bold;">Structure explained</div>
+Program structure:
 1) connect to **two** exchanages
-2) receive data from **two** exchanges. _prints it to console_
+2) receive data from **two** exchanges. _prints that data to console_
 3) Send data via a channel to the strategy(arbitrage seeking) thread.
-4) i) Build Cross Exchange LOB  
+4) i) Build Cross Exchange LOB   _prints to console_
    ii) Assert if there is arbitrage
-5) sends the required messages back to the exchange to exploit arbitrage.
+5) Send the required requests back to the exchanges to exploit arbitrage.
 
-Currently we only provide incomplete functionality to exploit Simple Arbitrage (which we defined as: _there is an ask on one exchange lower than a bid in another exchange_ - then we buy @ ask price (eg $98) and sell @ bid price (eg $100)).
+Exploit **Simple Arbitrage** logic is WIP (which I defined as: _there is an ask on one exchange lower than a bid in another exchange_ - then we buy @ ask price (eg $98) and sell @ bid price (eg $100)).
 
-The library provide utils to extend this set up to as many exchanges as required, and be easily extendable to other arbitrage strategies (eg Call Put parity, Calendar etc).
+The library provides utils to extend this set up to as many exchanges as required, and be easily extendable to other arbitrage strategies (eg Call Put parity, Calendar etc).
 
-In other words, exchange URLs, inst names for subscription, data serializes - are unique for each exchange and must be provided on case by case basis. These are hardcoded.
+However, exchange URLs, inst names for subscription, (incoming/outgoing) data/message structures - are unique for each exchange and must be provided on case by case basis. These are hardcoded in the binary for our **two** exchanges: **OKX** and **DERIBIT**.
 
-<div style="color: red; font-weight: bold;">
-⚠ Warning: You should provide inst names to the binary. Below is an example with default values - these can be dropped.
+<div style="color: red;">
+⚠ Warning: You could provide inst names to the binary. Below is an example with default values - these can be dropped.
 </div>
 
-# How to run
+# <div style="color: lightblue; font-weight: bold;">How to run </div>
 `cargo run -- --okx-inst BTC-USD-251226-100000-C --deribit-inst BTC-26DEC25-100000-C`
 
-# How to extend
-Based on the above, this is what is required to set up the program to explo
-Each message from exchange must be covertable into `Into<CrossExchangeLOB>`. In our case we implement `ExchangeData` enum.
+# <div style="color: lightblue; font-weight: bold;">How to extend </div>
 
-Binary hardcodes
-It all starts from data from exhanges. 
-- Each has a unique data set.
+Due to exchange specific items listed in the first section - each message from exchange must be convertible into `Into<CrossExchangeLOB>`. In other words, you must (de)serialize exchange data. In this case I implement it for `ExchangeData` enum. This must be correctly reflected in `ExchangeProducerMap` (a map from exchange Id to the exchange-unique producer which sends orders to exchange).
 
-
-# TODOs (in order of priority)
+# <div style="color: lightblue; font-weight: bold;"> TODOs </div> (in order of priority)
 All `TODOs` are also marked in the code.
-- Serialization is done via Serde. While this is convenient - it is not good enough for low latency app. We should write our own serialisers from bytes for max efficiency. i) We know the expected format of the data and ii) we know which data we need.
-- The example (binary) is for 1 instrument and two exchanges. This can be extended.
+- Serialization is done via Serde. While this is convenient - it is not good enough for low latency app. One should write their own serializers from bytes for max efficiency. i) We know the expected format of the data and ii) we know which data we need.
+- Further code restructuring - one should introduce Exchange and ExchangeHandle structs (Actor model). 
 - Ignoring Sequence and timestamps - for now assume messages come in the "correct" order
-- Ser/Deser could be much more efficient
-- Assuming OKX data (in response, which is a list) is always of len 1
+- We are making some serious assumptions about data. eg. Assuming OKX data (in response, which is a list) is always of len 1
 
-# Questions
+# <div style="color: lightblue; font-weight: bold;"> Questions </div>
 - OKX Sends action `snapshot`/`update`. Assuming Update **to a Price level** is the new total Quantity (from that it follows that update to quantity 0 is a cancel(or match) of all orders at that price).
