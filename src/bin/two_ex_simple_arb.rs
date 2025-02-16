@@ -48,8 +48,6 @@ struct DeribitData {
     params: DeribitDataParams,
 }
 
-// ### ### ###
-
 #[derive(Serialize, Deserialize, Debug)]
 struct BidsAsksDeribit {
     pub asks: Vec<[f64; 2]>,
@@ -132,6 +130,10 @@ impl From<ExchangeData> for CrossExchangeLOB {
         }
     }
 }
+
+// ### ### ###
+// ### ### ###
+// ### ### ###
 
 #[tokio::main]
 async fn main() {

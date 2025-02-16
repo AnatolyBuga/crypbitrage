@@ -62,10 +62,15 @@ pub async fn exchange_ws_connection<T>(
     exchange_name: String,
     subscribe_msg: String,
     url: String,
+    // receiver: receives data from strategies to be sent to exchange -per exchange
 ) -> JoinHandle<()>
 where
     T: Into<CrossExchangeLOB> + Send + DeserializeOwned + 'static,
 {
+    // TODO
+    // Open a MPSC channel here (to be used as SPSC)
+    // receiver stays with with exchange and listens
+    // producer is returned to downstream arb strategy
     let (ws_stream, _) = connect_async(url)
         .await
         .expect("WebSocket connection failed");

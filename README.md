@@ -10,11 +10,18 @@ Currently we only provide incomplete functionality to exploit Simple Arbitrage (
 
 The library provide utils to extend this set up to as many exchanges as required, and be easily extendable to other arbitrage strategies (eg Call Put parity, Calendar etc).
 
-In other words, exchange URLs, inst names for subscription, data serializes - are unique for each exchange and must be provided on case by case basis.
+In other words, exchange URLs, inst names for subscription, data serializes - are unique for each exchange and must be provided on case by case basis. These are hardcoded.
+
+<div style="color: red; font-weight: bold;">
+⚠ Warning: You should provide inst names to the binary. Below is an example with default values - these can be dropped.
+</div>
+
+# How to run
+`cargo run -- --okx-inst BTC-USD-251226-100000-C --deribit-inst BTC-26DEC25-100000-C`
 
 # How to extend
 Based on the above, this is what is required to set up the program to explo
-Each message from exchange must be covertable into `CrossExchangeLOB`.
+Each message from exchange must be covertable into `Into<CrossExchangeLOB>`. In our case we implement `ExchangeData` enum.
 
 Binary hardcodes
 It all starts from data from exhanges. 
