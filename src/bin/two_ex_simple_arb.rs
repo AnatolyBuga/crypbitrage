@@ -1,18 +1,7 @@
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-};
 
 use clap::Parser;
-use futures_util::{SinkExt, StreamExt};
-use ordered_float::OrderedFloat;
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
-use tokio::{
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
-    task::JoinHandle,
-};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crypbitrage::{create_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB, LobLeg};
 
