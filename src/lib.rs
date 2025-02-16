@@ -1,9 +1,15 @@
-use std::{collections::BTreeMap, sync::{Arc, Mutex}};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 use futures_util::{SinkExt, StreamExt};
 use ordered_float::OrderedFloat;
 use serde::de::DeserializeOwned;
-use tokio::{sync::mpsc::{UnboundedReceiver, UnboundedSender}, task::JoinHandle};
+use tokio::{
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
+};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// OrderedFloat is needed to use Price in BTreeMap
@@ -26,7 +32,9 @@ impl CrossExchangeLOB {
     }
 }
 
-pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static> (mut receiver: UnboundedReceiver<T>) {
+pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
+    mut receiver: UnboundedReceiver<T>,
+) {
     let _lob = Arc::new(Mutex::new(CrossExchangeLOB::default()));
 
     while let Some(msg) = receiver.recv().await {

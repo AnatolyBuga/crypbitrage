@@ -1,9 +1,10 @@
-
 use clap::Parser;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 
-use crypbitrage::{create_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB, LobLeg};
+use crypbitrage::{
+    create_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB, LobLeg,
+};
 
 /// Helps parsing cli args.
 /// Part of the binary, since it has nothing to do with the library
@@ -31,7 +32,6 @@ pub struct CliArgs {
 
 const OKX_URL: &str = "wss://ws.okx.com:8443/ws/v5/public";
 const DERIBIT_URL: &str = "wss://www.deribit.com/ws/api/v2";
-
 
 // Raw Deserialised data from Exchanges
 // Unofrtunately each exchange has a unique data format
@@ -132,8 +132,6 @@ impl From<ExchangeData> for CrossExchangeLOB {
         }
     }
 }
-
-
 
 #[tokio::main]
 async fn main() {
