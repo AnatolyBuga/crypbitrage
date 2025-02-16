@@ -1,10 +1,11 @@
 # Structure explained
 The idea of the binary (and the lib):
 1) connect to **two** exchanages
-2) receive data from **two** exchanges.
-3) Send data via a channel to the arbitrage seeking thread.
-4) Assert if there is arbitrage
-5) send the required messages back to the exchange to exploit arbitrage.
+2) receive data from **two** exchanges. _prints it to console_
+3) Send data via a channel to the strategy(arbitrage seeking) thread.
+4) i) Build Cross Exchange LOB  
+   ii) Assert if there is arbitrage
+5) sends the required messages back to the exchange to exploit arbitrage.
 
 Currently we only provide incomplete functionality to exploit Simple Arbitrage (which we defined as: _there is an ask on one exchange lower than a bid in another exchange_ - then we buy @ ask price (eg $98) and sell @ bid price (eg $100)).
 

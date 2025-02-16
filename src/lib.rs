@@ -32,6 +32,10 @@ impl CrossExchangeLOB {
     }
 }
 
+/// Main Function for computing Simple Arbitrage
+/// Builds In Memory Cross Exchange LOB from updates received by receiver
+/// Evaluates if Simple Arbitrage is present
+/// Sends orders on how to execute it
 pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
     mut receiver: UnboundedReceiver<T>,
 ) {
@@ -39,6 +43,7 @@ pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
 
     while let Some(msg) = receiver.recv().await {
         let lob = Arc::clone(&_lob);
+
         // Assume arbitrage check is a heavy CPU task
         tokio::task::spawn_blocking(move || {
             let update_data: CrossExchangeLOB = msg.into();
@@ -49,12 +54,17 @@ pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
         .expect("Panic on arbitrage calc")
     }
 }
-pub fn create_channel<T: Into<CrossExchangeLOB>>() -> (
+
+
+/// Helper
+pub fn create_channel<T>() -> (
     tokio::sync::mpsc::UnboundedSender<T>,
     tokio::sync::mpsc::UnboundedReceiver<T>,
 ) {
     tokio::sync::mpsc::unbounded_channel() // Returns (Sender<T>, Receiver<T>)
 }
+
+type OrderExecMessage = Message;
 
 /// sender - sends exchange data to downstream consumers (Arbitrage Strategies)
 pub async fn exchange_ws_connection<T>(
@@ -65,12 +75,15 @@ pub async fn exchange_ws_connection<T>(
     // receiver: receives data from strategies to be sent to exchange -per exchange
 ) -> JoinHandle<()>
 where
-    T: Into<CrossExchangeLOB> + Send + DeserializeOwned + 'static,
+    T: Send + DeserializeOwned + 'static,
 {
     // TODO
     // Open a MPSC channel here (to be used as SPSC)
     // receiver stays with with exchange and listens
     // producer is returned to downstream arb strategy
+    let (order_sender, mut order_receiver) = create_channel::<OrderExecMessage>();
+
+    // Start websocket sesh
     let (ws_stream, _) = connect_async(url)
         .await
         .expect("WebSocket connection failed");
@@ -88,6 +101,23 @@ where
         });
 
     println!("Subscribed to {}", exchange_name);
+
+    let exch_name_clone = exchange_name.clone();
+
+    // Listen to write instructions
+    tokio::spawn(async move {
+        while let Some(msg) = order_receiver.recv().await {
+            write
+        .send(msg)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "{} Failed to send order exec message: {}",
+                exch_name_clone, e
+            )
+        });
+        }
+    });
 
     tokio::spawn(async move {
         while let Some(msg) = ws_reader.next().await {
@@ -112,5 +142,10 @@ where
                 }
             }
         }
-    })
+    };
+
+    
+
+
+)
 }
