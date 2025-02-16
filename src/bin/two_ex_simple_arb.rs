@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 
 use crypbitrage::{
-    create_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB, LobLeg,
+    create_unbound_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB, ExchangeProducerMap, LobLeg
 };
 
 /// Helps parsing cli args.
@@ -86,6 +86,7 @@ where
         .collect()
 }
 
+/// 0 represents OKX Exchange Id
 impl From<OkxData> for CrossExchangeLOB {
     fn from(ex_data: OkxData) -> Self {
         // known length
@@ -101,6 +102,7 @@ impl From<OkxData> for CrossExchangeLOB {
     }
 }
 
+/// 1 represents Deribit Exchange Id
 impl From<DeribitData> for CrossExchangeLOB {
     fn from(ex_data: DeribitData) -> Self {
         // known length
@@ -141,7 +143,7 @@ async fn main() {
 
     // Channel for sending Exchange LOB updates
     // TODO Not sure about channel size
-    let (sender, receiver) = create_channel::<ExchangeData>();
+    let (sender, receiver) = create_unbound_channel::<ExchangeData>();
 
     // TODO Channel for sending back arbitrage exploit order
 
@@ -153,12 +155,14 @@ async fn main() {
         ]
     })
     .to_string();
-    let task1 = exchange_ws_connection(
+
+    
+    let (task1, producer1) = exchange_ws_connection(
         sender.clone(),
         "OKX".to_string(),
         subscribe_msg_okx,
         OKX_URL.to_string(),
-    );
+    ).await; // Stop here till this future is complete (doesn't mean tokio::spawn is complete)
 
     // Deribit
     let deribit_channel = format!("book.{}.none.20.100ms", cli.deribit_inst);
@@ -170,14 +174,16 @@ async fn main() {
         "id": 0})
     .to_string();
 
-    let task2 = exchange_ws_connection(
+    let (task2, producer2) = exchange_ws_connection(
         sender.clone(),
         "DERIBIT".to_string(),
         subscribe_msg_deribit,
         DERIBIT_URL.to_string(),
-    );
+    ).await;
 
-    let task3 = tokio::spawn(run_simple_arbitrage(receiver));
+    let exchange_producer_map = ExchangeProducerMap::from_iter([(0, producer1), (1,producer2)]);
+
+    let task3 = tokio::spawn(run_simple_arbitrage(receiver, exchange_producer_map));
 
     // https://stackoverflow.com/questions/69638710/when-should-you-use-tokiojoin-over-tokiospawn
     let _ = tokio::join!(task1, task2, task3);

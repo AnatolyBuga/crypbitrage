@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex},
 };
 
@@ -38,6 +38,7 @@ impl CrossExchangeLOB {
 /// Sends orders on how to execute it
 pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
     mut receiver: UnboundedReceiver<T>,
+    _exchange_producer_map: ExchangeProducerMap
 ) {
     let _lob = Arc::new(Mutex::new(CrossExchangeLOB::default()));
 
@@ -49,6 +50,15 @@ pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
             let update_data: CrossExchangeLOB = msg.into();
             lob.lock().unwrap().update(update_data);
             println!("{lob:#?}")
+
+            // TODO
+            // check if max bid is less than min ask
+            // eg if bid is 101$ on exch 0 and ask is 100$ on exch 1
+            // then buy on exch 1 @ 100$, sell on exch 0 for 101$
+            // producer can be retrieved via the _exchange_producer_map
+            
+
+
         })
         .await
         .expect("Panic on arbitrage calc")
@@ -56,15 +66,19 @@ pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
 }
 
 
-/// Helper
-pub fn create_channel<T>() -> (
-    tokio::sync::mpsc::UnboundedSender<T>,
-    tokio::sync::mpsc::UnboundedReceiver<T>,
+/// Create channel 
+pub fn create_unbound_channel<T>() -> (
+    UnboundedSender<T>,
+    UnboundedReceiver<T>,
 ) {
-    tokio::sync::mpsc::unbounded_channel() // Returns (Sender<T>, Receiver<T>)
+    tokio::sync::mpsc::unbounded_channel()
 }
 
-type OrderExecMessage = Message;
+/// Message to Execute this Order on the exchnage
+pub type OrderExecMessage = Message;
+
+/// Maps Exchange Id to a producer (which is used to send message to that particular exchange)
+pub type ExchangeProducerMap = HashMap<u8, UnboundedSender<Message>>;
 
 /// sender - sends exchange data to downstream consumers (Arbitrage Strategies)
 pub async fn exchange_ws_connection<T>(
@@ -73,7 +87,7 @@ pub async fn exchange_ws_connection<T>(
     subscribe_msg: String,
     url: String,
     // receiver: receives data from strategies to be sent to exchange -per exchange
-) -> JoinHandle<()>
+) -> (JoinHandle<()>, UnboundedSender<OrderExecMessage>)
 where
     T: Send + DeserializeOwned + 'static,
 {
@@ -81,7 +95,7 @@ where
     // Open a MPSC channel here (to be used as SPSC)
     // receiver stays with with exchange and listens
     // producer is returned to downstream arb strategy
-    let (order_sender, mut order_receiver) = create_channel::<OrderExecMessage>();
+    let (order_sender, mut order_receiver) = create_unbound_channel::<OrderExecMessage>();
 
     // Start websocket sesh
     let (ws_stream, _) = connect_async(url)
@@ -119,14 +133,15 @@ where
         }
     });
 
-    tokio::spawn(async move {
+    // Listen to Exchange data coming in
+    ( tokio::spawn(async move {
         while let Some(msg) = ws_reader.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
                     println!("{}: {}", exchange_name, text);
                     // TODO Optimisation decode only data , not the whole message
                     match serde_json::from_slice::<T>(text.as_bytes()) {
-                        Ok(exchange_data) => sender.send(exchange_data).unwrap_or_else(|e| {
+                        Ok(exchange_data) => sender.send(exchange_data).unwrap_or_else(|e|  {
                             panic!(
                                 "{} data deserialized, but couldn't send: {}",
                                 exchange_name, e
@@ -142,10 +157,9 @@ where
                 }
             }
         }
-    };
-
-    
-
-
+    }
+    ),
+    order_sender
 )
+
 }
