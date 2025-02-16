@@ -7,14 +7,14 @@ use tokio::{sync::mpsc::{UnboundedReceiver, UnboundedSender}, task::JoinHandle};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// OrderedFloat is needed to use Price in BTreeMap
-type Price = OrderedFloat<f64>;
-type Quantity = f64;
-type ExchangeId = u8;
+pub type Price = OrderedFloat<f64>;
+pub type Quantity = f64;
+pub type ExchangeId = u8;
 /// Bids or Asks
-type LobLeg = BTreeMap<(Price, ExchangeId), Quantity>;
+pub type LobLeg = BTreeMap<(Price, ExchangeId), Quantity>;
 
 #[derive(Default, Debug)]
-struct CrossExchangeLOB {
+pub struct CrossExchangeLOB {
     pub asks: LobLeg,
     pub bids: LobLeg,
 }
@@ -26,7 +26,7 @@ impl CrossExchangeLOB {
     }
 }
 
-async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static> (mut receiver: UnboundedReceiver<T>) {
+pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static> (mut receiver: UnboundedReceiver<T>) {
     let _lob = Arc::new(Mutex::new(CrossExchangeLOB::default()));
 
     while let Some(msg) = receiver.recv().await {
@@ -41,7 +41,7 @@ async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static> (mut r
         .expect("Panic on arbitrage calc")
     }
 }
-fn create_channel<T: Into<CrossExchangeLOB>>() -> (
+pub fn create_channel<T: Into<CrossExchangeLOB>>() -> (
     tokio::sync::mpsc::UnboundedSender<T>,
     tokio::sync::mpsc::UnboundedReceiver<T>,
 ) {
@@ -49,7 +49,7 @@ fn create_channel<T: Into<CrossExchangeLOB>>() -> (
 }
 
 /// sender - sends exchange data to downstream consumers (Arbitrage Strategies)
-async fn exchange_ws_connection<T>(
+pub async fn exchange_ws_connection<T>(
     sender: UnboundedSender<T>,
     exchange_name: String,
     subscribe_msg: String,

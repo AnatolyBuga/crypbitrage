@@ -14,6 +14,8 @@ use tokio::{
 };
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+use crypbitrage::{create_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB, LobLeg};
+
 /// Helps parsing cli args.
 /// Part of the binary, since it has nothing to do with the library
 #[derive(Parser)]
@@ -150,7 +152,7 @@ async fn main() {
 
     // Channel for sending Exchange LOB updates
     // TODO Not sure about channel size
-    let (sender, receiver) = create_channel();
+    let (sender, receiver) = create_channel::<ExchangeData>();
 
     // TODO Channel for sending back arbitrage exploit order
 
