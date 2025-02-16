@@ -38,7 +38,7 @@ impl CrossExchangeLOB {
 /// Sends orders on how to execute it
 pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
     mut receiver: UnboundedReceiver<T>,
-    _exchange_producer_map: ExchangeProducerMap
+    _exchange_producer_map: ExchangeProducerMap,
 ) {
     let _lob = Arc::new(Mutex::new(CrossExchangeLOB::default()));
 
@@ -56,21 +56,14 @@ pub async fn run_simple_arbitrage<T: Into<CrossExchangeLOB> + Send + 'static>(
             // eg if bid is 101$ on exch 0 and ask is 100$ on exch 1
             // then buy on exch 1 @ 100$, sell on exch 0 for 101$
             // producer can be retrieved via the _exchange_producer_map
-            
-
-
         })
         .await
         .expect("Panic on arbitrage calc")
     }
 }
 
-
-/// Create channel 
-pub fn create_unbound_channel<T>() -> (
-    UnboundedSender<T>,
-    UnboundedReceiver<T>,
-) {
+/// Create channel
+pub fn create_unbound_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>) {
     tokio::sync::mpsc::unbounded_channel()
 }
 
@@ -121,45 +114,41 @@ where
     // Listen to write instructions
     tokio::spawn(async move {
         while let Some(msg) = order_receiver.recv().await {
-            write
-        .send(msg)
-        .await
-        .unwrap_or_else(|e| {
-            panic!(
-                "{} Failed to send order exec message: {}",
-                exch_name_clone, e
-            )
-        });
+            write.send(msg).await.unwrap_or_else(|e| {
+                panic!(
+                    "{} Failed to send order exec message: {}",
+                    exch_name_clone, e
+                )
+            });
         }
     });
 
     // Listen to Exchange data coming in
-    ( tokio::spawn(async move {
-        while let Some(msg) = ws_reader.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    println!("{}: {}", exchange_name, text);
-                    // TODO Optimisation decode only data , not the whole message
-                    match serde_json::from_slice::<T>(text.as_bytes()) {
-                        Ok(exchange_data) => sender.send(exchange_data).unwrap_or_else(|e|  {
-                            panic!(
-                                "{} data deserialized, but couldn't send: {}",
-                                exchange_name, e
-                            )
-                        }),
-                        Err(e) => println!("{}: couldn't deserialize: {e}", exchange_name),
+    (
+        tokio::spawn(async move {
+            while let Some(msg) = ws_reader.next().await {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        println!("{}: {}", exchange_name, text);
+                        // TODO Optimisation decode only data , not the whole message
+                        match serde_json::from_slice::<T>(text.as_bytes()) {
+                            Ok(exchange_data) => sender.send(exchange_data).unwrap_or_else(|e| {
+                                panic!(
+                                    "{} data deserialized, but couldn't send: {}",
+                                    exchange_name, e
+                                )
+                            }),
+                            Err(e) => println!("{}: couldn't deserialize: {e}", exchange_name),
+                        }
+                    }
+                    Ok(_) => (),
+                    Err(e) => {
+                        eprintln!("{} WebSocket error: {:?}", exchange_name, e);
+                        break;
                     }
                 }
-                Ok(_) => (),
-                Err(e) => {
-                    eprintln!("{} WebSocket error: {:?}", exchange_name, e);
-                    break;
-                }
             }
-        }
-    }
-    ),
-    order_sender
-)
-
+        }),
+        order_sender,
+    )
 }

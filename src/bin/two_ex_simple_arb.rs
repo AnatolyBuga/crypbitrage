@@ -3,7 +3,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 
 use crypbitrage::{
-    create_unbound_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB, ExchangeProducerMap, LobLeg
+    create_unbound_channel, exchange_ws_connection, run_simple_arbitrage, CrossExchangeLOB,
+    ExchangeProducerMap, LobLeg,
 };
 
 /// Helps parsing cli args.
@@ -156,13 +157,13 @@ async fn main() {
     })
     .to_string();
 
-    
     let (task1, producer1) = exchange_ws_connection(
         sender.clone(),
         "OKX".to_string(),
         subscribe_msg_okx,
         OKX_URL.to_string(),
-    ).await; // Stop here till this future is complete (doesn't mean tokio::spawn is complete)
+    )
+    .await; // Stop here till this future is complete (doesn't mean tokio::spawn is complete)
 
     // Deribit
     let deribit_channel = format!("book.{}.none.20.100ms", cli.deribit_inst);
@@ -179,9 +180,10 @@ async fn main() {
         "DERIBIT".to_string(),
         subscribe_msg_deribit,
         DERIBIT_URL.to_string(),
-    ).await;
+    )
+    .await;
 
-    let exchange_producer_map = ExchangeProducerMap::from_iter([(0, producer1), (1,producer2)]);
+    let exchange_producer_map = ExchangeProducerMap::from_iter([(0, producer1), (1, producer2)]);
 
     let task3 = tokio::spawn(run_simple_arbitrage(receiver, exchange_producer_map));
 
