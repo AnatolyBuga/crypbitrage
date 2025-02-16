@@ -3,10 +3,10 @@ use std::{collections::{BTreeMap, BTreeSet}, sync::{Arc, Mutex}};
 use clap::Parser;
 use futures_util::{stream::SplitStream, SinkExt, StreamExt};
 use ordered_float::OrderedFloat;
-use serde::{Deserialize, Serialize, Deserializer};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
-use tokio::sync::{mpsc::UnboundedReceiver};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio::{net::TcpStream, sync::mpsc::{UnboundedReceiver, UnboundedSender}, task::JoinHandle};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 /// Helps parsing cli args.
 /// Part of the binary, since it has nothing to do with the library
@@ -140,7 +140,8 @@ impl From<DeribitData> for CrossExchangeLOB {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
 enum ExchangeData{
     OKX(OkxData),
     Deribit(DeribitData),
@@ -172,14 +173,14 @@ struct CrossExchangeLOB{
 }
 
 impl CrossExchangeLOB {
-    pub fn update(mut self, other: CrossExchangeLOB) {
+    pub fn update(&mut self, other: CrossExchangeLOB) {
         self.asks.extend(other.asks);
         self.bids.extend(other.bids);
     }
 }
 
 
-async fn simple_arbitrage(mut receiver: UnboundedReceiver<ExchangeData>){
+async fn run_simple_arbitrage(mut receiver: UnboundedReceiver<ExchangeData>){
 
     let _lob = Arc::new(Mutex::new(CrossExchangeLOB::default()));
     
@@ -188,11 +189,10 @@ async fn simple_arbitrage(mut receiver: UnboundedReceiver<ExchangeData>){
         // Assume arbitrage check is a heavy CPU task 
         tokio::task::spawn_blocking( move || {
             
-            let update_lob: CrossExchangeLOB = msg.into();
-            let mut _locked = lob.lock().unwrap();
-            _locked.update(update_lob);
+            let update_data: CrossExchangeLOB = msg.into();
+            lob.lock().unwrap().update(update_data);
+            println!("{lob:#?}")
 
-            println!("{msg:#?}")
         })
         .await
         .expect("Panic on arbitrage calc")
@@ -202,6 +202,44 @@ fn create_channel<T: Into<CrossExchangeLOB>>() -> (tokio::sync::mpsc::UnboundedS
     tokio::sync::mpsc::unbounded_channel() // Returns (Sender<T>, Receiver<T>)
 }
 
+async fn exchange_connection<T>(sender: UnboundedSender<T>, exchange_name: String, subscribe_msg: String, url: String)
+    -> JoinHandle<()>
+where
+    T:  Into<CrossExchangeLOB> + Send + DeserializeOwned + 'static,
+    {
+    
+    let (ws_stream, _) = connect_async(url).await.expect("WebSocket connection failed");
+    let (mut write, mut ws_reader) = ws_stream.split();
+
+    // Send subscription request
+    write.send(Message::Text(subscribe_msg.into()))
+        .await
+        .unwrap_or_else(|e| panic!("{} Failed to send subscription message: {}", exchange_name, e));
+
+    println!("Subscribed to {}", exchange_name);
+    
+    tokio::spawn( async move {
+        while let Some(msg) = ws_reader.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    println!("{}: {}", exchange_name, text);
+                    // TODO Optimisation decode only data , not the whole message
+                    match serde_json::from_slice::<T>(text.as_bytes()) {
+                        Ok(exchange_data) => sender.send(exchange_data)
+                        .unwrap_or_else(|e| panic!("{} data deserialized, but couldn't send: {}", exchange_name, e)),
+                        Err(e) => println!("{}: couldn't deserialize: {e}", exchange_name)
+                    } 
+                }
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("{} WebSocket error: {:?}", exchange_name, e);
+                    break;
+                }
+            }
+        }
+    })
+}
+
 #[tokio::main]
 async fn main() {
 
@@ -209,95 +247,33 @@ async fn main() {
 
     // Channel for sending Exchange LOB updates
     // TODO Not sure about channel size
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    // let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     // let (sender, mut receiver: impl Into<CrossExchangeLOB>) = tokio::sync::mpsc::unbounded_channel();
-    // let (sender, mut receiver) = create_channel();
-    let s1 = sender.clone();
-    let s2 = sender.clone();
+    let (sender, mut receiver) = create_channel();
 
     // TODO Channel for sending back arbitrage exploit order
-    
+
     // OKX
-    let subscribe_msg = json!({
+    let subscribe_msg_okx = json!({
         "op": "subscribe",
         "args": [
             {"channel": "books", "instId": cli.okx_inst}
         ]
     }).to_string();
-
-    let (ws_stream, _) = connect_async(OKX_URL).await.expect("WebSocket connection failed");
-    let (mut write, mut read) = ws_stream.split();
-
-    // Send subscription request
-    write.send(Message::Text(subscribe_msg.into()))
-        .await
-        .expect("Failed to send subscription message");
-
-    println!("Subscribed to OKX");
-
-    let task1 = tokio::spawn( async move {
-        while let Some(msg) = read.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    println!("OKX: {}", text);
-                    // TODO Optimisation decode only data , not the whole message
-                    match serde_json::from_slice::<OkxData>(text.as_bytes()) {
-                        Ok(okx_data) => s1.send(ExchangeData::OKX(okx_data)).expect("OKX couldn't send"),//println!("OKX Deser: {okx_data:#?}"),
-                        Err(e) => println!("OKX: couldn't deserialise: {e}")
-                    } 
-                }
-                Ok(_) => (),
-                Err(e) => {
-                    eprintln!("WebSocket error: {:?}", e);
-                    break;
-                }
-            }
-        }
-    });
-
-
-
-
-    // DERIBIT_URL
+    let task1 = exchange_connection(sender.clone(), "OKX".to_string(), subscribe_msg_okx, OKX_URL.to_string());
+    
+    // Deribit
     let deribit_channel = format!("book.{}.none.20.100ms", cli.deribit_inst);
 
-    let subscribe_msg2 = json!({
+    let subscribe_msg_deribit = json!({
         "method": "public/subscribe",
         "params": {"channels": [deribit_channel]},
         "jsonrpc": "2.0",
         "id": 0}).to_string();
+    
+    let task2 = exchange_connection(sender.clone(), "DERIBIT".to_string(), subscribe_msg_deribit, DERIBIT_URL.to_string());
 
-    let (ws_stream2, _) = connect_async(DERIBIT_URL).await.expect("WebSocket connection failed");
-    let (mut write2, mut read2) = ws_stream2.split();
-
-    // Send subscription request
-    write2.send(Message::Text(subscribe_msg2.into()))
-        .await
-        .expect("Failed to send subscription message");
-
-    println!("Subscribed to DERIBIT");
-
-    let task2 = tokio::spawn( async move {
-        while let Some(msg) = read2.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    println!("DERIBIT: {}", text);
-                    // TODO Optimisation decode only data , not the whole message
-                    match serde_json::from_slice::<DeribitData>(text.as_bytes()) {
-                        Ok(data) => s2.send(ExchangeData::Deribit(data)).expect("Deribit couldn't send"),
-                        Err(e) => println!("Deribit: couldn't deserialise: {e}")
-                    }
-                }
-                Ok(_) => (),
-                Err(e) => {
-                    eprintln!("WebSocket error: {:?}", e);
-                    break;
-                }
-            }
-        }
-    });
-
-    let task3 = tokio::spawn(simple_arbitrage(receiver));
+    let task3 = tokio::spawn(run_simple_arbitrage(receiver));
 
     // https://stackoverflow.com/questions/69638710/when-should-you-use-tokiojoin-over-tokiospawn
     tokio::join!(task1, task2, task3);
