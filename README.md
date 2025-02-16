@@ -7,6 +7,15 @@ Program structure:
    ii) Assert if there is arbitrage
 5) Send the required requests back to the exchanges to exploit arbitrage.
 
+The printed Cross Exchange LOB to be read as follows:
+```
+asks: {
+            (
+                0.234, # price
+                0,     # exchange Id (to identify which exchange order came from)
+            ): 606.0,  # Quantity
+```
+
 Exploit **Simple Arbitrage** logic is WIP (which I defined as: _there is an ask on one exchange lower than a bid in another exchange_ - then we buy @ ask price (eg $98) and sell @ bid price (eg $100)).
 
 The library provides utils to extend this set up to as many exchanges as required, and be easily extendable to other arbitrage strategies (eg Call Put parity, Calendar etc).
